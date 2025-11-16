@@ -1,0 +1,62 @@
+import backtrader as bt
+from datetime import time
+
+class GoldBreakoutUS_MTF(bt.Strategy):
+
+    params = dict(
+        rsi_period=14,
+        lookback=10,
+        sl_points=10,      # Stop loss fixe en points
+        tp_points=20,      # Take profit fixe en points
+    )
+
+    def __init__(self):
+        # --- DATA 0 = 15m (main)
+        # --- DATA 1 = 1H (higher timeframe)
+        self.data15 = self.datas[0]
+        self.data1h = self.datas[1]
+
+        # --- RSI sur 1H (filtre tendance)
+        self.rsi_htf = bt.indicators.RSI(self.data1h.close, period=self.p.rsi_period)
+
+        # --- Support / Resistance sur 15m
+        self.resistance = bt.indicators.Highest(self.data15.high, period=self.p.lookback)
+        self.support    = bt.indicators.Lowest(self.data15.low, period=self.p.lookback)
+
+    def next(self):
+        dt = self.data15.datetime.time(0)
+
+        # --- Session US : Après 15h30
+        if dt < time(15, 30):
+            return
+
+        # --- Conditions de cassure
+        break_up = self.data15.close[0] > self.resistance[0]
+        break_down = self.data15.close[0] < self.support[0]
+
+        # --- Confirmation : précédente clôture ne cassait pas
+        confirm_up = break_up and self.data15.close[-1] <= self.resistance[-1]
+        confirm_down = break_down and self.data15.close[-1] >= self.support[-1]
+
+        # --- STOPLOSS & TAKE PROFIT
+        buy_price = self.data15.close[0]
+        sell_price = self.data15.close[0]
+
+        buy_sl  = buy_price - self.p.sl_points
+        buy_tp  = buy_price + self.p.tp_points
+
+        sell_sl = sell_price + self.p.sl_points
+        sell_tp = sell_price - self.p.tp_points
+
+        # --- Entrée LONG
+        if not self.position:
+            if confirm_up and self.rsi_htf[0] > 50:
+                o = self.buy(data=self.data15)
+                self.sell(data=self.data15, exectype=bt.Order.Stop,  price=buy_sl)
+                self.sell(data=self.data15, exectype=bt.Order.Limit, price=buy_tp)
+
+            # --- Entrée SHORT
+            elif confirm_down and self.rsi_htf[0] < 50:
+                o = self.sell(data=self.data15)
+                self.buy(data=self.data15, exectype=bt.Order.Stop,  price=sell_sl)
+                self.buy(data=self.data15, exectype=bt.Order.Limit, price=sell_tp)
